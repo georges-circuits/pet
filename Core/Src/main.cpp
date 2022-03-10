@@ -1,6 +1,7 @@
 
-#include "init.h"
 
+#include "init.h"
+#include "../libprotoserial/libprotoserial/interface.hpp"
 
 
 int main(void)
@@ -16,6 +17,9 @@ int main(void)
 	MX_TIM2_Init();
 
 	HAL_TIM_Base_Start_IT(&htim2);
+
+
+	sp::loopback_interface interface(0, 1, 10, 64, 256);
 
 	while (1)
 	{
