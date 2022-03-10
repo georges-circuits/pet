@@ -1,0 +1,3 @@
+[submodule "libprotoserial"]
+	path = libprotoserial
+	url = git@github.com:georges-circuits/libprotoserial.git
