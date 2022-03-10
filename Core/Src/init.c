@@ -1,3 +1,4 @@
+//THIS FILE GETS OVERWRITTEN BY A SCRIPT THAT RUNS AFTER THE CUBEMX CODE GENERATOR
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
