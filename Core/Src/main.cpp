@@ -24,8 +24,8 @@ public:
 	{
 		set_pulse_min(1ms);
 		set_pulse_max(2ms);
-		__HAL_TIM_SET_COMPARE(_htim, _channel, counter_mid());
 		HAL_TIM_PWM_Start(_htim, _channel);
+		__HAL_TIM_SET_COMPARE(_htim, _channel, counter_mid());
 	}
 
 	/* value from 0.0 to 1.0 */
@@ -34,7 +34,7 @@ public:
 		if (deflection < 0.0) deflection = 0.0;
 		else if (deflection > 1.0) deflection = 1.0;
 		__HAL_TIM_SET_COMPARE(_htim, _channel, (uint32_t)(1.0 *
-				(_counter_max - _counter_min) * deflection + 1.0 * _counter_min));
+				((_counter_max - _counter_min) * deflection) + _counter_min));
 	}
 
 	void set_pulse_min(pulse_duration duration) {_counter_min = duration_to_tim(duration);}
@@ -44,7 +44,7 @@ private:
 
 	uint32_t counter_mid() const {return (_counter_min + _counter_max) / 2.0;}
 	uint32_t duration_to_tim(pulse_duration duration) const {
-		return (uint32_t)(1.0 * (duration / _period_duration) * _counter_period);
+		return (uint32_t)((1.0 * duration / _period_duration) * _counter_period);
 	}
 
 	TIM_HandleTypeDef *_htim;
@@ -81,27 +81,30 @@ int main(void)
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
 	MX_TIM2_Init();
+	MX_TIM3_Init();
 
 	//HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
-	//servo s(&htim3, TIM_CHANNEL_1, 19999);
+	servo s(&htim3, TIM_CHANNEL_1, 9999);
 
+	//HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+	//__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 1000);
 
 	//sp::loopback_interface interface(0, 1, 10, 64, 256);
 	sp::uart_interface uart0_interface(uart0_huart, 0, 1, 10, 64, 512);
 	uart0_handle = &uart0_interface;
-	sp::fragmentation_handler uart0_handler(uart0_interface.max_data_size(), 10ms, 100ms, 2);
+	sp::fragmentation_handler uart0_handler(uart0_interface.max_data_size(), 10ms, 100ms, 3);
 
 	while (1)
 	{
-		uart0_interface.main_task();
-		uart0_handler.main_task();
+		//uart0_interface.main_task();
+		//uart0_handler.main_task();
 
-		/*for (float d = 0.0; d < 1.0; d += 0.05)
+		for (float d = 0.45; d <= 0.6; d += 0.02)
 		{
 			s.set(d);
-			HAL_Delay(100);
-		}*/
+			HAL_Delay(500);
+		}
 
 	}
 }
