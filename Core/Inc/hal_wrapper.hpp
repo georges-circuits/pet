@@ -36,7 +36,10 @@ namespace stm32
 		void set_pwm_dutycycle(uint32_t channel, uint32_t value) {__HAL_TIM_SET_COMPARE(_htim, channel, value);}
 
 		void set_prescaler(uint32_t value) {__HAL_TIM_SET_PRESCALER(_htim, value);}
-		void set_period(uint32_t value) {__HAL_TIM_SET_AUTORELOAD(_htim, value);}
+		void set_period(uint32_t value) {
+			__HAL_TIM_SET_AUTORELOAD(_htim, value == 0 ? 1 : value);
+			__HAL_TIM_SET_COUNTER(_htim, 0);
+		}
 
 		TIM_HandleTypeDef * handle() {return _htim;}
 		uint32_t prescaler() const {return _prescaler;}
@@ -92,8 +95,8 @@ namespace stm32
 		gpio(GPIO_TypeDef * port, uint32_t pin):
 			_port(port), _pin(pin) {}
 
-		bool read() const {return (bool)(HAL_GPIO_ReadPin(_port, _pin));}
-		void write(bool state) {HAL_GPIO_WritePin(_port, _pin, (GPIO_PinState)(state));}
+		virtual bool read() const {return (bool)(HAL_GPIO_ReadPin(_port, _pin));}
+		virtual void write(bool state) {HAL_GPIO_WritePin(_port, _pin, (GPIO_PinState)(state));}
 		void toggle() {HAL_GPIO_TogglePin(_port, _pin);}
 
 		void set() {write(true);}

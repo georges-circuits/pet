@@ -12,6 +12,7 @@
 
 #include <memory>
 #include <utility>
+#include <cmath>
 
 template<typename val_type>
 struct calibrator
@@ -78,7 +79,7 @@ public:
 class simple_stepper : public actuator<float>
 {
 protected:
-	const float _max = 1.0, _min = -1.0, _deadband = 0.001;
+	const float _max = 1.0, _min = -1.0;//, _deadband = 0.001;
 
 	stm32::timer_oc_channel _step_gen;
 	stm32::gpio_inv _direction, _enable;
@@ -90,7 +91,7 @@ protected:
 		{
 			stop();
 		}
-		else if (ratio >= _deadband || ratio <= _deadband)
+		else //if (ratio >= _deadband || ratio <= _deadband)
 		{
 			if (ratio > 0.0)
 				_direction.set();
@@ -101,9 +102,14 @@ protected:
 			}
 			/* now the ratio belongs to the interval (_deadband,1], we want to map
 			 * this to the interval [1, _step_gen.period()] using inverse function */
-			_step_gen.set_period((uint32_t)((ratio + _deadband >= 1.0) ?
-					1.0 : (_deadband / ratio) * _step_gen.period())
-			);
+			/*_step_gen.set_period((uint32_t)((ratio + _deadband >= 1.0) ?
+					1.0 : (_deadband / ratio) * (float)_step_gen.period())
+			);*/
+
+			uint32_t max = _step_gen.period(), min = max / 50;
+			uint32_t p = -std::log10((ratio + 0.1) / 1.1) * (float)max;
+			_step_gen.set_period(p > max ? max : (p < min ? min : p));
+
 			start();
 		}
 	}
