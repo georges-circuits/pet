@@ -2,3 +2,7 @@
 #define USR_BTN_Pin GPIO_PIN_13
 #define USR_BTN_GPIO_Port GPIOC
 #define USR_BTN_EXTI_IRQn EXTI4_15_IRQn
+#define STEP_EN_Pin GPIO_PIN_6
+#define STEP_EN_GPIO_Port GPIOA
+#define STEP_DIR_Pin GPIO_PIN_7
+#define STEP_DIR_GPIO_Port GPIOA

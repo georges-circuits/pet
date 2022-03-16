@@ -12,46 +12,10 @@
 using namespace std::chrono_literals;
 using namespace sp::literals;
 
-class servo
-{
-public:
+#include "hal_wrapper.hpp"
+#include "actuators.hpp"
 
-	using pulse_duration = sp::clock::duration;
 
-	/* this assumes that the timer is setup to generate 50Hz PWM */
-	servo(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t counter_period):
-		_htim(htim), _channel(channel), _counter_period(counter_period)
-	{
-		set_pulse_min(1ms);
-		set_pulse_max(2ms);
-		HAL_TIM_PWM_Start(_htim, _channel);
-		__HAL_TIM_SET_COMPARE(_htim, _channel, counter_mid());
-	}
-
-	/* value from 0.0 to 1.0 */
-	void set(float deflection)
-	{
-		if (deflection < 0.0) deflection = 0.0;
-		else if (deflection > 1.0) deflection = 1.0;
-		__HAL_TIM_SET_COMPARE(_htim, _channel, (uint32_t)(1.0 *
-				((_counter_max - _counter_min) * deflection) + _counter_min));
-	}
-
-	void set_pulse_min(pulse_duration duration) {_counter_min = duration_to_tim(duration);}
-	void set_pulse_max(pulse_duration duration) {_counter_max = duration_to_tim(duration);}
-
-private:
-
-	uint32_t counter_mid() const {return (_counter_min + _counter_max) / 2.0;}
-	uint32_t duration_to_tim(pulse_duration duration) const {
-		return (uint32_t)((1.0 * duration / _period_duration) * _counter_period);
-	}
-
-	TIM_HandleTypeDef *_htim;
-	uint32_t _channel;
-	uint32_t _counter_period, _counter_min, _counter_max;
-	const pulse_duration _period_duration = 20ms;
-};
 
 
 UART_HandleTypeDef *uart0_huart = &huart1;
@@ -85,7 +49,15 @@ int main(void)
 
 	//HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
-	servo s(&htim3, TIM_CHANNEL_1, 9999);
+	stm32::timer tim3(&htim3, 31, 9999);
+	stm32::timer tim2(&htim2, 319, 999);
+
+	servo steering(stm32::timer_pwm_channel(&tim3, TIM_CHANNEL_1));
+	simple_stepper drive(
+			stm32::timer_oc_channel(&tim2, TIM_CHANNEL_1),
+			stm32::gpio_inv(STEP_DIR_GPIO_Port, STEP_DIR_Pin),
+			stm32::gpio_inv(STEP_EN_GPIO_Port, STEP_EN_Pin)
+	);
 
 	//HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 	//__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 1000);
@@ -100,9 +72,10 @@ int main(void)
 		//uart0_interface.main_task();
 		//uart0_handler.main_task();
 
-		for (float d = 0.45; d <= 0.6; d += 0.02)
+		for (float d = 0; d <= 1.2; d += 0.02)
 		{
-			s.set(d);
+			//steering.set(d);
+			drive.set(d);
 			HAL_Delay(500);
 		}
 
