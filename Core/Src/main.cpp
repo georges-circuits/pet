@@ -69,8 +69,7 @@ int main(void)
 			stm32::gpio_inv(STEP_EN_GPIO_Port, STEP_EN_Pin, true)
 	);
 
-	//HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-	//__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 1000);
+	stm32::gpio_inv ir_pin(IR_GPIO_Port, IR_Pin);
 
 	//sp::loopback_interface interface(0, 1, 10, 64, 256);
 	//sp::uart_interface uart0_interface(uart0_huart, 0, 1, 10, 64, 512);
@@ -78,6 +77,12 @@ int main(void)
 	//sp::fragmentation_handler uart0_handler(uart0_interface.max_data_size(), 10ms, 100ms, 3);
 
 	//float val = 1;
+
+	const float forw = 0.05, forw_fast = 0.25, back = -0.05, right = 0, left = 1, straight = 0.5;
+	bool ir_now, ir_last, found = false;
+	uint32_t on_time, off_time, time;
+
+	steering.set(straight);
 
 	while (1)
 	{
@@ -91,9 +96,37 @@ int main(void)
 		{
 			//steering.set(d);
 			//drive.set(d > 0.1 ? 0.1 - d : d);
-			Debug_Print("hello\n");
-			HAL_Delay(200);
+			//HAL_Delay(200);
 		}
+
+		ir_now = ir_pin.read();
+		time = HAL_GetTick();
+		Debug_Print("IR: %i\n", ir_now);
+
+		if (ir_now && !ir_last) on_time = time;
+		if (!ir_now && ir_last) off_time = time;
+
+		if (!ir_now && off_time > time - 100 && on_time < time - 3000)
+		{
+			drive.set(0);
+			HAL_Delay(1000);
+			steering.set(right);
+			HAL_Delay(300);
+			drive.set(forw_fast);
+			HAL_Delay(3000);
+			steering.set(left);
+			HAL_Delay(3000);
+			drive.set(0);
+			steering.set(straight);
+			found = true;
+		}
+		else if (!found)
+		{
+			drive.set(forw);
+		}
+
+		ir_last = ir_now;
+		HAL_Delay(100);
 
 	}
 }
