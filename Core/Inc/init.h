@@ -17,6 +17,8 @@ extern TIM_HandleTypeDef htim3;
 
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart5;
 
 
 void SystemClock_Config(void);
@@ -27,6 +29,8 @@ void MX_ADC_Init(void);
 void MX_TIM3_Init(void);
 void MX_USART1_UART_Init(void);
 void MX_USART2_UART_Init(void);
+void MX_USART4_UART_Init(void);
+void MX_USART5_UART_Init(void);
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 

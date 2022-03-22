@@ -60,6 +60,8 @@ extern DMA_HandleTypeDef hdma_adc;
 extern ADC_HandleTypeDef hadc;
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart5;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -184,6 +186,21 @@ void ADC1_COMP_IRQHandler(void)
   /* USER CODE BEGIN ADC1_COMP_IRQn 1 */
 
   /* USER CODE END ADC1_COMP_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART4 and USART5 interrupt.
+  */
+void USART4_5_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART4_5_IRQn 0 */
+
+  /* USER CODE END USART4_5_IRQn 0 */
+  HAL_UART_IRQHandler(&huart4);
+  HAL_UART_IRQHandler(&huart5);
+  /* USER CODE BEGIN USART4_5_IRQn 1 */
+
+  /* USER CODE END USART4_5_IRQn 1 */
 }
 
 /**
