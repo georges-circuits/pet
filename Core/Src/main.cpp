@@ -3,12 +3,9 @@
 
 #include "init.h"
 
-#include "../libprotoserial/libprotoserial/interface.hpp"
-#include "../libprotoserial/libprotoserial/fragmentation.hpp"
+#include "../libprotoserial/libprotoserial/protostacks.hpp"
 #include "../libprotoserial/libprotoserial/clock.hpp"
 
-#include <chrono>
-using namespace std::chrono_literals;
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -86,11 +83,10 @@ int main(void)
 	tof_sensors.start_receive(&huart4);
 	tof_sensors.start_receive(&huart5);*/
 
-	//sp::loopback_interface interface(0, 1, 10, 64, 256);
-	sp::uart_interface uart0_interface(uart0_huart, 0, 1, 10, 64, 512);
-	uart0_handle = &uart0_interface;
-	sp::fragmentation_handler uart0_handler(uart0_interface.interface_id(), uart0_interface.max_data_size(), 50ms, 100ms, 3);
-	uart0_handler.bind_to(uart0_interface);
+	sp::stack::uart_115200 uart(uart0_huart, 0, 1);
+	uart0_handle = &uart.interface;
+
+
 
 	/*uart0_interface.receive_event.subscribe([&](sp::fragment f) {
 		auto check = sp::footers::crc32(f.data());
@@ -98,9 +94,9 @@ int main(void)
 		HAL_GPIO_TogglePin(DBG1_GPIO_Port, DBG1_Pin);
 	});*/
 
-	uart0_handler.transfer_receive_event.subscribe([&](sp::transfer t) {
+	uart.transfer_receive_subscribe([&](sp::transfer t) {
 		auto resp = sp::transfer(std::move(t.create_response()), sp::transfer_data(std::move(t)));
-		uart0_handler.transmit(std::move(resp));
+		uart.transfer_transmit(std::move(resp));
 		HAL_GPIO_TogglePin(DBG1_GPIO_Port, DBG1_Pin);
 	});
 
@@ -114,8 +110,7 @@ int main(void)
 
 	while (1)
 	{
-		uart0_interface.main_task();
-		uart0_handler.main_task();
+		uart.main_task();
 
 		//uart0_handler.main_task();
 
