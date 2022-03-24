@@ -94,19 +94,26 @@ int main(void)
 		HAL_GPIO_TogglePin(DBG1_GPIO_Port, DBG1_Pin);
 	});*/
 
+	static uint32_t last_rx = 0;
+	int autonomous = 0;
 	uart.transfer_receive_subscribe([&](sp::transfer t) {
 
+		last_rx = HAL_GetTick();
 		if (t.data_size() == 2)
 		{
 			auto data = t.data_contiguous();
-			float val = ((int)data[1] - 127) / 100.0;
+			int val = (int)data[1];
 			switch (data[0])
 			{
 			case 1_BYTE:
-				drive.set(val);
+				drive.set((val - 127) / 100.0);
 				break;
 			case 2_BYTE:
-				steering.set(val);
+				steering.set((val - 127) / 100.0);
+				break;
+			case 3_BYTE:
+				autonomous = val;
+				break;
 			}
 		}
 
@@ -125,7 +132,7 @@ int main(void)
 		uart.main_task();
 
 		static uint32_t tick = 0;
-		if (tick + 250 < HAL_GetTick())
+		if (tick + 1000 < HAL_GetTick())
 		{
 			tick = HAL_GetTick();
 			auto tr = sp::transfer(uart.interface_id());
@@ -140,6 +147,87 @@ int main(void)
 
 			tr.push_back(std::move(data));
 			uart.transfer_transmit(std::move(tr));
+		}
+
+		if (HAL_GetTick() - last_rx > 3000)
+		{
+			drive.set(0);
+			steering.set(0);
+		}
+		else
+		{
+			static uint32_t state_changed = 0, next_in = 0, turns = 0;
+			const float speed = 0.70, rate = 0.8;
+			const uint16_t min_dist = 300;
+			if (autonomous > 0)
+			{
+				switch (autonomous) {
+					case 1: /* init */
+						drive.set(0);
+						steering.set(0);
+						next_in = 1;
+						turns = 2;
+						break;
+					case 2: /* creep forward */
+						drive.set(speed);
+						next_in = 1;
+						break;
+					case 3: /* detect an obstacle */
+						if (tof_sensors.at(tof::S5).value() < min_dist ||
+								tof_sensors.at(tof::S6).value() < min_dist)
+							next_in = 100;
+						else
+							next_in = 0;
+						break;
+					case 4: /* start reversing and turning */
+						if (!next_in)
+						{
+							drive.set(-speed);
+							steering.set(rate);
+							next_in = 3000;
+						}
+						break;
+					case 5: /* go forward and turn the other way completing the rotation maneuver */
+						if (!next_in)
+						{
+							drive.set(speed);
+							steering.set(-rate);
+							next_in = 3000;
+						}
+						break;
+					case 6: /* repeat the above turns-times */
+						if (turns > 0)
+						{
+							turns -= 1;
+							state_changed = HAL_GetTick();
+							autonomous = 4;
+						}
+						else
+							next_in = 1;
+						break;
+					case 7: /* go forward again */
+						if (!next_in)
+						{
+							drive.set(speed);
+							steering.set(0);
+							next_in = 10000;
+						}
+						break;
+					default:
+						drive.set(0);
+						steering.set(0);
+						autonomous = 0;
+						next_in = 0;
+						break;
+				}
+
+				if (next_in && HAL_GetTick() - state_changed >= next_in)
+				{
+					state_changed = HAL_GetTick();
+					autonomous += 1;
+					next_in = 0;
+				}
+			}
 		}
 
 		//uart0_handler.main_task();
