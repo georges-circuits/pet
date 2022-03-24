@@ -15,6 +15,7 @@
 #include "actuators.hpp"
 #include "tof_sensor.hpp"
 
+using namespace sp::literals;
 
 
 UART_HandleTypeDef *uart0_huart = &huart1;
@@ -66,27 +67,26 @@ int main(void)
 
 	//Debug_Print("Hi\n");
 
-	stm32::timer tim2(&htim2, 6, 999);
+	stm32::timer tim2(&htim2, 31, 999);
 	stm32::timer tim3(&htim3, 31, 19999);
 
 	servo steering(stm32::timer_pwm_channel(&tim3, TIM_CHANNEL_1));
 	simple_stepper drive(
 			stm32::timer_oc_channel(&tim2, TIM_CHANNEL_1),
 			stm32::gpio_inv(STEP_DIR_GPIO_Port, STEP_DIR_Pin, true),
-			stm32::gpio_inv(STEP_EN_GPIO_Port, STEP_EN_Pin, true)
+			stm32::gpio_inv(STEP_EN_GPIO_Port, STEP_EN_Pin, true),
+			false
 	);
 
 	stm32::gpio_inv ir_pin(IR_GPIO_Port, IR_Pin);
 
-	/*tof_sensor_manager tof_sensors;
+	tof_sensor_manager tof_sensors;
 	tof_sensors_handle = &tof_sensors;
 	tof_sensors.start_receive(&huart4);
-	tof_sensors.start_receive(&huart5);*/
+	tof_sensors.start_receive(&huart5);
 
 	sp::stack::uart_115200 uart(uart0_huart, 0, 1);
 	uart0_handle = &uart.interface;
-
-
 
 	/*uart0_interface.receive_event.subscribe([&](sp::fragment f) {
 		auto check = sp::footers::crc32(f.data());
@@ -95,9 +95,21 @@ int main(void)
 	});*/
 
 	uart.transfer_receive_subscribe([&](sp::transfer t) {
-		auto resp = sp::transfer(std::move(t.create_response()), sp::transfer_data(std::move(t)));
-		uart.transfer_transmit(std::move(resp));
-		HAL_GPIO_TogglePin(DBG1_GPIO_Port, DBG1_Pin);
+
+		if (t.data_size() == 2)
+		{
+			auto data = t.data_contiguous();
+			float val = ((int)data[1] - 127) / 100.0;
+			switch (data[0])
+			{
+			case 1_BYTE:
+				drive.set(val);
+				break;
+			case 2_BYTE:
+				steering.set(val);
+			}
+		}
+
 	});
 
 	//float val = 1;
@@ -111,6 +123,24 @@ int main(void)
 	while (1)
 	{
 		uart.main_task();
+
+		static uint32_t tick = 0;
+		if (tick + 250 < HAL_GetTick())
+		{
+			tick = HAL_GetTick();
+			auto tr = sp::transfer(uart.interface_id());
+			tr.set_destination(2);
+
+			auto data = sp::bytes(0, 0, tof::COUNT);
+			for (auto & sensor : tof_sensors)
+			{
+				auto val = sensor.value();
+				data.push_back((sp::byte)(val == tof_sensor::invalid_value ? 0 : val / 10));
+			}
+
+			tr.push_back(std::move(data));
+			uart.transfer_transmit(std::move(tr));
+		}
 
 		//uart0_handler.main_task();
 
