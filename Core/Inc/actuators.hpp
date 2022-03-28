@@ -13,17 +13,58 @@
 #include <memory>
 #include <utility>
 #include <cmath>
+#include <list>
 
 template<typename val_type>
-struct calibrator
+constexpr bool is_within(val_type value, val_type pivot, val_type range)
+{
+	return value >= pivot - range && value <= pivot + range;
+}
+
+template<typename val_type>
+struct actuator_calibrator
 {
 	virtual val_type forward(val_type) = 0;
 };
 
 template<typename val_type>
+struct actuator_filter
+{
+	virtual val_type forward(val_type) = 0;
+};
+
+template<typename val_type>
+class filter_linear : public actuator_filter<val_type>
+{
+	const val_type _increment;
+	val_type _current;
+
+public:
+
+	filter_linear(val_type increment, val_type initial = 0):
+		_increment(increment), _current(initial) {}
+
+	val_type forward(val_type setpoint)
+	{
+		if (is_within(_current, setpoint, _increment))
+			return _current = setpoint;
+		else
+		{
+			if (setpoint > _current)
+				return _current += _increment;
+			else
+				return _current -= _increment;
+		}
+	}
+};
+
+template<typename val_type>
 class actuator
 {
-	std::unique_ptr<calibrator<val_type>> _cal;
+	std::unique_ptr<actuator_calibrator<val_type>> _calibrator;
+	std::unique_ptr<actuator_filter<val_type>> _filter;
+
+	val_type _setpoint, _current;
 
 	virtual void do_set(float) = 0;
 
@@ -33,13 +74,67 @@ public:
 	{
 		if (setpoint < setpoint_min()) setpoint = setpoint_min();
 		else if (setpoint > setpoint_max()) setpoint = setpoint_max();
-		do_set(_cal ? _cal->forward(setpoint) : setpoint);
+		_setpoint = setpoint;
+		update();
 	}
+
+	void update()
+	{
+		val_type s = _setpoint;
+		if (_filter) s = _filter->forward(s);
+		_current = s;
+		if (_calibrator) s = _calibrator->forward(s);
+		do_set(s);
+	}
+
+	val_type get_current() const {return _current;}
+	val_type get_setpoint() const {return _setpoint;}
 
 	virtual val_type setpoint_max() const = 0;
 	virtual val_type setpoint_min() const = 0;
 
-	void set_calibrator(std::unique_ptr<calibrator<val_type>> cal) {_cal = std::move(cal);}
+	void set_calibrator(std::unique_ptr<actuator_calibrator<val_type>> calibrator) {_calibrator = std::move(calibrator);}
+	void set_filter(std::unique_ptr<actuator_filter<val_type>> filter) {_filter = std::move(filter);}
+};
+
+template<class actuator_type>
+class actuator_manager
+{
+	std::list<std::unique_ptr<actuator_type>> _actuators;
+
+public:
+
+	template<class Type, typename... Args>
+	actuator_type* new_actuator(Args... args)
+	{
+		auto ret = new Type(std::forward<Args>(args)...);
+		_actuators.push_back(std::unique_ptr<actuator_type>(ret));
+		return ret;
+	}
+
+	void update()
+	{
+		for (auto & a : _actuators)
+		{
+			if (a->get_current() != a->get_setpoint())
+				a->update();
+		}
+	}
+
+};
+
+
+
+
+class test_actuator : public actuator<float>
+{
+	void do_set(float deflection) {}
+
+public:
+	test_actuator() {}
+
+	float setpoint_max() const {return 1.0;}
+	float setpoint_min() const {return -1.0;}
 };
 
 class servo : public actuator<float>
@@ -67,13 +162,6 @@ public:
 
 	float setpoint_max() const {return 1.0;}
 	float setpoint_min() const {return -1.0;}
-
-	/*inline uint32_t duration_to_tim(pulse_duration duration) const
-	{
-		return (uint32_t)((1.0 * duration / _period_duration) * _pwm.get_timer().period());
-	}
-
-	const pulse_duration _period_duration = 20ms;*/
 };
 
 class simple_stepper : public actuator<float>

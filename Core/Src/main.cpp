@@ -22,6 +22,8 @@ UART_HandleTypeDef *uart0_huart = &huart1;
 sp::uart_interface *uart0_handle;
 tof_sensor_manager *tof_sensors_handle;
 
+actuator_manager<actuator<float>> manager;
+
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -35,6 +37,12 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if (huart->Instance == uart0_huart->Instance)
 		uart0_handle->isr_tx_done();
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim->Instance == htim6.Instance)
+		manager.update();
 }
 
 void Debug_Print(const char *format, ...)
@@ -56,8 +64,10 @@ int main(void)
 
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
+	MX_ADC_Init();
 	MX_TIM2_Init();
 	MX_TIM3_Init();
+	MX_TIM6_Init();
 	MX_USART1_UART_Init();
 	MX_USART2_UART_Init();
 	MX_USART4_UART_Init();
@@ -70,13 +80,24 @@ int main(void)
 	stm32::timer tim2(&htim2, 31, 999);
 	stm32::timer tim3(&htim3, 31, 19999);
 
-	servo steering(stm32::timer_pwm_channel(&tim3, TIM_CHANNEL_1));
-	simple_stepper drive(
+	auto steering = manager.new_actuator<servo>(stm32::timer_pwm_channel(&tim3, TIM_CHANNEL_1));
+	steering->set_filter(std::make_unique<filter_linear<float>>(0.08));
+
+	auto drive = manager.new_actuator<simple_stepper>(
 			stm32::timer_oc_channel(&tim2, TIM_CHANNEL_1),
 			stm32::gpio_inv(STEP_DIR_GPIO_Port, STEP_DIR_Pin, true),
 			stm32::gpio_inv(STEP_EN_GPIO_Port, STEP_EN_Pin, true),
 			false
 	);
+	drive->set_filter(std::make_unique<filter_linear<float>>(0.05));
+
+	//servo steering(stm32::timer_pwm_channel(&tim3, TIM_CHANNEL_1));
+	/*simple_stepper drive(
+			stm32::timer_oc_channel(&tim2, TIM_CHANNEL_1),
+			stm32::gpio_inv(STEP_DIR_GPIO_Port, STEP_DIR_Pin, true),
+			stm32::gpio_inv(STEP_EN_GPIO_Port, STEP_EN_Pin, true),
+			false
+	);*/
 
 	stm32::gpio_inv ir_pin(IR_GPIO_Port, IR_Pin);
 
@@ -85,8 +106,13 @@ int main(void)
 	tof_sensors.start_receive(&huart4);
 	tof_sensors.start_receive(&huart5);
 
-	sp::stack::uart_115200 uart(uart0_huart, 0, 1);
-	uart0_handle = &uart.interface;
+	//sp::stack::uart_115200 uart(uart0_huart, 0, 1);
+	//uart0_handle = &uart.interface;
+
+	sp::uart_interface uart(uart0_huart, 0, 1, 10, 64, 256);
+	uart0_handle = &uart;
+
+	HAL_TIM_Base_Start_IT(&htim6);
 
 	/*uart0_interface.receive_event.subscribe([&](sp::fragment f) {
 		auto check = sp::footers::crc32(f.data());
@@ -96,20 +122,23 @@ int main(void)
 
 	static uint32_t last_rx = 0;
 	int autonomous = 0;
-	uart.transfer_receive_subscribe([&](sp::transfer t) {
+	//uart.transfer_receive_subscribe([&](sp::transfer t) {
+	uart.receive_event.subscribe([&](sp::fragment t) {
 
 		last_rx = HAL_GetTick();
-		if (t.data_size() == 2)
+		//if (t.data_size() == 2)
+		if (t.data().size() == 2)
 		{
-			auto data = t.data_contiguous();
+			//auto data = t.data_contiguous();
+			auto data = t.data();
 			int val = (int)data[1];
 			switch (data[0])
 			{
 			case 1_BYTE:
-				drive.set((val - 127) / 100.0);
+				drive->set((val - 127) / 100.0);
 				break;
 			case 2_BYTE:
-				steering.set((val - 127) / 100.0);
+				steering->set((val - 127) / 100.0);
 				break;
 			case 3_BYTE:
 				autonomous = val;
@@ -125,7 +154,7 @@ int main(void)
 	bool ir_now, ir_last, found = false;
 	uint32_t on_time, off_time, time;*/
 
-	//steering.set(straight);
+	//steering->set(straight);
 
 	while (1)
 	{
@@ -135,7 +164,8 @@ int main(void)
 		if (tick + 1000 < HAL_GetTick())
 		{
 			tick = HAL_GetTick();
-			auto tr = sp::transfer(uart.interface_id());
+
+			/*auto tr = sp::transfer(uart.interface_id());
 			tr.set_destination(2);
 
 			auto data = sp::bytes(0, 0, tof::COUNT);
@@ -146,13 +176,22 @@ int main(void)
 			}
 
 			tr.push_back(std::move(data));
-			uart.transfer_transmit(std::move(tr));
+			uart.transfer_transmit(std::move(tr));*/
+
+			HAL_ADC_Start(&hadc);
+			HAL_ADC_PollForConversion(&hadc, 5);
+			auto val = HAL_ADC_GetValue(&hadc);
+			float voltage = (val / 4095.0) * 3.3 * 6.6;
+
+			sp::bytes d(1);
+			d[0] = (sp::byte)(int)(voltage * 10.0);
+			uart.write_noexcept(sp::fragment(2, std::move(d)));
 		}
 
 		if (HAL_GetTick() - last_rx > 3000)
 		{
-			drive.set(0);
-			steering.set(0);
+			drive->set(0);
+			steering->set(0);
 		}
 		else
 		{
@@ -163,13 +202,13 @@ int main(void)
 			{
 				switch (autonomous) {
 					case 1: /* init */
-						drive.set(0);
-						steering.set(0);
+						drive->set(0);
+						steering->set(0);
 						next_in = 1;
 						turns = 2;
 						break;
 					case 2: /* creep forward */
-						drive.set(speed);
+						drive->set(speed);
 						next_in = 1;
 						break;
 					case 3: /* detect an obstacle */
@@ -182,16 +221,16 @@ int main(void)
 					case 4: /* start reversing and turning */
 						if (!next_in)
 						{
-							drive.set(-speed);
-							steering.set(rate);
+							drive->set(-speed);
+							steering->set(rate);
 							next_in = 3000;
 						}
 						break;
 					case 5: /* go forward and turn the other way completing the rotation maneuver */
 						if (!next_in)
 						{
-							drive.set(speed);
-							steering.set(-rate);
+							drive->set(speed);
+							steering->set(-rate);
 							next_in = 3000;
 						}
 						break;
@@ -208,14 +247,14 @@ int main(void)
 					case 7: /* go forward again */
 						if (!next_in)
 						{
-							drive.set(speed);
-							steering.set(0);
+							drive->set(speed);
+							steering->set(0);
 							next_in = 10000;
 						}
 						break;
 					default:
-						drive.set(0);
-						steering.set(0);
+						drive->set(0);
+						steering->set(0);
 						autonomous = 0;
 						next_in = 0;
 						break;
@@ -232,13 +271,13 @@ int main(void)
 
 		//uart0_handler.main_task();
 
-		//steering.set(val);
+		//steering->set(val);
 		//val = -val;
 
 		//for (float d = -0.3; d <= 0.5; d += 0.1)
 		{
-			//steering.set(d);
-			//drive.set(d > 0.1 ? 0.1 - d : d);
+			//steering->set(d);
+			//drive->set(d > 0.1 ? 0.1 - d : d);
 			//HAL_Delay(200);
 		}
 
@@ -251,21 +290,21 @@ int main(void)
 
 		if (!ir_now && off_time > time - 100 && on_time < time - 3000)
 		{
-			drive.set(0);
+			drive->set(0);
 			HAL_Delay(1000);
-			steering.set(right);
+			steering->set(right);
 			HAL_Delay(300);
-			drive.set(forw_fast);
+			drive->set(forw_fast);
 			HAL_Delay(3000);
-			steering.set(left);
+			steering->set(left);
 			HAL_Delay(3000);
-			drive.set(0);
-			steering.set(straight);
+			drive->set(0);
+			steering->set(straight);
 			found = true;
 		}
 		else if (!found)
 		{
-			drive.set(forw);
+			drive->set(forw);
 		}
 
 		ir_last = ir_now;
