@@ -15,6 +15,8 @@
 #include "actuators.hpp"
 #include "tof_sensor.hpp"
 
+#include "stm_adc.h"
+
 using namespace sp::literals;
 
 
@@ -44,6 +46,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	if (htim->Instance == htim6.Instance)
 		manager.update();
 }
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+	STM32ADC_ConvCpltCallback(hadc);
+	STM32ADC_Start(); //FIXME should not be needed
+}
 
 void Debug_Print(const char *format, ...)
 {
@@ -64,6 +71,7 @@ int main(void)
 
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
+	MX_DMA_Init();
 	MX_ADC_Init();
 	MX_TIM2_Init();
 	MX_TIM3_Init();
@@ -76,6 +84,9 @@ int main(void)
 	//RetargetInit(&huart2);
 
 	//Debug_Print("Hi\n");
+
+	STM32ADC_Init(&hadc);
+	STM32ADC_Start();
 
 	stm32::timer tim2(&htim2, 31, 999);
 	stm32::timer tim3(&htim3, 31, 19999);
@@ -161,7 +172,7 @@ int main(void)
 		uart.main_task();
 
 		static uint32_t tick = 0;
-		if (tick + 1000 < HAL_GetTick())
+		if (tick + 200 < HAL_GetTick())
 		{
 			tick = HAL_GetTick();
 
@@ -178,13 +189,16 @@ int main(void)
 			tr.push_back(std::move(data));
 			uart.transfer_transmit(std::move(tr));*/
 
-			HAL_ADC_Start(&hadc);
+			/*HAL_ADC_Start(&hadc);
 			HAL_ADC_PollForConversion(&hadc, 5);
-			auto val = HAL_ADC_GetValue(&hadc);
-			float voltage = (val / 4095.0) * 3.3 * 6.6;
+			auto val = HAL_ADC_GetValue(&hadc);*/
 
-			sp::bytes d(1);
+			float voltage = STM32ADC_GetReading(STM32ADC_CHANNEL_BATT) * 6.6;
+			float ir = (STM32ADC_GetReading(STM32ADC_CHANNEL_IR) / STM32ADC_FULLSCALEVOLTAGE) * 255;
+
+			sp::bytes d(2);
 			d[0] = (sp::byte)(int)(voltage * 10.0);
+			d[1] = (sp::byte)(ir);
 			uart.write_noexcept(sp::fragment(2, std::move(d)));
 		}
 
@@ -269,46 +283,6 @@ int main(void)
 			}
 		}
 
-		//uart0_handler.main_task();
-
-		//steering->set(val);
-		//val = -val;
-
-		//for (float d = -0.3; d <= 0.5; d += 0.1)
-		{
-			//steering->set(d);
-			//drive->set(d > 0.1 ? 0.1 - d : d);
-			//HAL_Delay(200);
-		}
-
-		/*ir_now = ir_pin.read();
-		time = HAL_GetTick();
-		Debug_Print("IR: %i\n", ir_now);
-
-		if (ir_now && !ir_last) on_time = time;
-		if (!ir_now && ir_last) off_time = time;
-
-		if (!ir_now && off_time > time - 100 && on_time < time - 3000)
-		{
-			drive->set(0);
-			HAL_Delay(1000);
-			steering->set(right);
-			HAL_Delay(300);
-			drive->set(forw_fast);
-			HAL_Delay(3000);
-			steering->set(left);
-			HAL_Delay(3000);
-			drive->set(0);
-			steering->set(straight);
-			found = true;
-		}
-		else if (!found)
-		{
-			drive->set(forw);
-		}
-
-		ir_last = ir_now;
-		HAL_Delay(100);*/
 
 	}
 }

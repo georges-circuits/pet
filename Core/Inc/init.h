@@ -10,7 +10,7 @@ extern "C" {
 #include "pin_defs.h"
 
 extern ADC_HandleTypeDef hadc;
-//extern DMA_HandleTypeDef hdma_adc;
+extern DMA_HandleTypeDef hdma_adc;
 
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
