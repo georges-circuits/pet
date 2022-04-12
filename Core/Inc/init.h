@@ -21,6 +21,8 @@ extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart4;
 extern UART_HandleTypeDef huart5;
 
+extern SPI_HandleTypeDef hspi2;
+
 
 void SystemClock_Config(void);
 void MX_GPIO_Init(void);
@@ -33,6 +35,7 @@ void MX_USART1_UART_Init(void);
 void MX_USART2_UART_Init(void);
 void MX_USART4_UART_Init(void);
 void MX_USART5_UART_Init(void);
+void MX_SPI2_Init(void);
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 

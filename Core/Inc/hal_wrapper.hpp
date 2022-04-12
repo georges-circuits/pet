@@ -92,7 +92,7 @@ namespace stm32
 
 	public:
 
-		gpio(GPIO_TypeDef * port, uint32_t pin):
+		gpio(GPIO_TypeDef *port, uint32_t pin):
 			_port(port), _pin(pin) {}
 
 		virtual bool read() const {return (bool)(HAL_GPIO_ReadPin(_port, _pin));}
@@ -110,7 +110,7 @@ namespace stm32
 
 	public:
 
-		gpio_inv(GPIO_TypeDef * port, uint32_t pin, bool inverted = false):
+		gpio_inv(GPIO_TypeDef *port, uint32_t pin, bool inverted = false):
 			gpio(port, pin), _inverted(inverted) {}
 
 		bool read() const {return _inverted != gpio::read();}
@@ -118,6 +118,29 @@ namespace stm32
 
 		bool is_inverted() const {return _inverted;}
 		void set_invert(bool invert) {_inverted = invert;}
+	};
+
+
+	class spi
+	{
+		SPI_HandleTypeDef *_hspi;
+
+	public:
+		spi(SPI_HandleTypeDef *hspi) :
+			_hspi(hspi) {}
+
+		bool transmit(uint8_t *pData, uint16_t Size, uint32_t Timeout = 10)
+		{
+			return HAL_SPI_Transmit(_hspi, pData, Size, Timeout) == HAL_OK;
+		}
+		bool receive(uint8_t *pData, uint16_t Size, uint32_t Timeout = 10)
+		{
+			return HAL_SPI_Receive(_hspi, pData, Size, Timeout) == HAL_OK;
+		}
+		bool transmitreceive(uint8_t *pTxData, uint8_t *pRxData, uint16_t Size, uint32_t Timeout = 10)
+		{
+			return HAL_SPI_TransmitReceive(_hspi, pTxData, pRxData, Size, Timeout) == HAL_OK;
+		}
 	};
 }
 

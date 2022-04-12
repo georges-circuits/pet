@@ -10,3 +10,5 @@
 #define STEP_DIR_GPIO_Port GPIOA
 #define DBG1_Pin GPIO_PIN_8
 #define DBG1_GPIO_Port GPIOC
+#define SPI2_NCS_Pin GPIO_PIN_5
+#define SPI2_NCS_GPIO_Port GPIOB
