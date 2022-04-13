@@ -54,7 +54,7 @@ class drive_pivot : public drive_const
 
 	status do_update()
 	{
-		if (_tick + _last >= clock::now())
+		if (_tick + _last < clock::now())
 		{
 			_last = clock::now();
 			_out = drive_output(-_out.drive, -_out.steering);

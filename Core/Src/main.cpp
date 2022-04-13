@@ -16,6 +16,7 @@
 #include "adxl345.hpp"
 #include "drive_logic.hpp"
 #include "stm_adc.h"
+#include "dsp.h"
 
 #define PI 3.14159265358979323846
 
@@ -61,10 +62,6 @@ void Debug_Print(const char *format, ...)
 	vprintf(format, args);
 	va_end(args);
 }
-
-
-
-
 
 
 int main(void)
@@ -119,6 +116,9 @@ int main(void)
 
 
 	ADXL345 accel(&spi2, stm32::gpio(SPI2_NCS_GPIO_Port, SPI2_NCS_Pin));
+	DSP_Biquad_t accel_x_filter, accel_y_filter;
+	DSP_Biquad_Init(&accel_x_filter, BIQUAD_LOWPASS, 5.0, 1000, 0.7);
+	DSP_Biquad_Init(&accel_y_filter, BIQUAD_LOWPASS, 5.0, 1000, 0.7);
 
 	tof_sensor_manager tof_sensors;
 	tof_sensors_handle = &tof_sensors;
@@ -166,26 +166,41 @@ int main(void)
 				break;
 			}
 		}
-
 	});
 
-	float fi = 0;
+	float fi = 0, ir = 0;
+
+	DSP_Biquad_t accel_fi_filter;
+	DSP_Biquad_Init(&accel_fi_filter, BIQUAD_LOWPASS, 1.0, 1000, 0.7);
+
 	while (1)
 	{
 		uart.main_task();
 		auto ad = accel.read();
+		ad.x = DSP_BiquadDF2(&accel_x_filter, -ad.x + 20);
+		ad.y = DSP_BiquadDF2(&accel_y_filter, ad.y);
 
-		float filter = 0.01;
-		if (fabs(ad.x) + fabs(ad.y) > 70)
-			fi = (fi * (1.0 - filter)) + (filter * (atan2(ad.x, ad.y) * 180 / PI));
-		else
-			fi = 0;
-
-
-		static uint32_t tick = 0;
-		if (tick + 200 < HAL_GetTick())
+		bool level = false;
+		if (fabs(ad.x) + fabs(ad.y) > 15)
 		{
-			tick = HAL_GetTick();
+			//fi = (fi * (1.0 - filter)) + (filter * (atan2(ad.y, -ad.x) * 180 / PI));
+			fi = atan2(ad.y, ad.x) * 180 / PI;
+		}
+		else
+		{
+			fi = 0;
+			level = true;
+		}
+		fi = DSP_BiquadDF2(&accel_fi_filter, fi);
+
+
+		float _ir = 100 - ((STM32ADC_GetReading(STM32ADC_CHANNEL_IR) / STM32ADC_FULLSCALEVOLTAGE) * 100.0);
+		ir = _ir;//(ir * (1.0 - filter)) + (filter * _ir);
+
+		static clock::time_point telemetry_last = clock::time_point(clock::duration(0));
+		if (telemetry_last + 200ms < clock::now())
+		{
+			telemetry_last = clock::now();
 
 			/*auto ad = accel.read();
 			Debug_Print("%05d %05d\n", ad.x, ad.y);*/
@@ -199,7 +214,6 @@ int main(void)
 			}*/
 
 			float voltage = STM32ADC_GetReading(STM32ADC_CHANNEL_BATT) * 6.6;
-			float ir = (STM32ADC_GetReading(STM32ADC_CHANNEL_IR) / STM32ADC_FULLSCALEVOLTAGE) * 255;
 
 			sp::bytes d(5);
 			d[0] = (sp::byte)(int)(voltage * 10.0);
@@ -218,9 +232,34 @@ int main(void)
 		}
 		else if (autonomous > 0)
 		{
+			bool on_edge = ir < 10;
+			static bool backing_down = false;
 			drive.update();
 
-			if (!drive.is_moving())
+			if (level)
+			{
+				if (drive.is_moving())
+					drive.cancel_all();
+
+				backing_down = false;
+			}
+			else if (on_edge)
+			{
+				if (!backing_down)
+				{
+					drive.cancel_all();
+					backing_down = true;
+					drive.next_move<drive_const>(-0.7, 0, [&, started = clock::now()](){
+						if (started + 3s < clock::now())
+						{
+							backing_down = false;
+							return true;
+						}
+						return false;
+					});
+				}
+			}
+			else if (!drive.is_moving())
 			{
 				const float threshold = 15.0;
 				if (fabs(fi) < threshold)
@@ -229,18 +268,18 @@ int main(void)
 						return fabs(fi) > threshold;
 					});
 				}
-				/*else if (fi > threshold)
+				else if (fi > threshold)
 				{
-					drive.next_move<drive_pivot>(0.65, -0.8, 2s, [&](){
+					drive.next_move<drive_pivot>(0.7, -0.8, 2s, [&](){
 						return fi < threshold / 2.0;
 					});
 				}
 				else if (fi < -threshold)
 				{
-					drive.next_move<drive_pivot>(0.65, 0.8, 2s, [&](){
+					drive.next_move<drive_pivot>(0.7, 0.8, 2s, [&](){
 						return fi > -threshold / 2.0;
 					});
-				}*/
+				}
 			}
 		}
 	}
