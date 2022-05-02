@@ -8,7 +8,7 @@
 #ifndef INC_HAL_WRAPPER_HPP_
 #define INC_HAL_WRAPPER_HPP_
 
-#ifdef STM32L073xx
+#if defined(STM32L073xx) || defined(STM32L031xx)
 #include "stm32l0xx_hal.h"
 #else
 #error "unknown device"
@@ -16,6 +16,7 @@
 
 namespace stm32
 {
+#ifdef HAL_TIM_MODULE_ENABLED
 	class timer
 	{
 	protected:
@@ -83,7 +84,8 @@ namespace stm32
 		void start() {_tim->start_pwm(_channel);}
 		void stop() {_tim->stop_pwm(_channel);}
 	};
-
+#endif
+#ifdef HAL_GPIO_MODULE_ENABLED
 	class gpio
 	{
 	protected:
@@ -119,8 +121,8 @@ namespace stm32
 		bool is_inverted() const {return _inverted;}
 		void set_invert(bool invert) {_inverted = invert;}
 	};
-
-
+#endif
+#ifdef HAL_SPI_MODULE_ENABLED
 	class spi
 	{
 		SPI_HandleTypeDef *_hspi;
@@ -129,19 +131,39 @@ namespace stm32
 		spi(SPI_HandleTypeDef *hspi) :
 			_hspi(hspi) {}
 
-		bool transmit(uint8_t *pData, uint16_t Size, uint32_t Timeout = 10)
+		bool transmit(uint8_t *pData, uint16_t Size, uint32_t Timeout = 100)
 		{
 			return HAL_SPI_Transmit(_hspi, pData, Size, Timeout) == HAL_OK;
 		}
-		bool receive(uint8_t *pData, uint16_t Size, uint32_t Timeout = 10)
+		bool receive(uint8_t *pData, uint16_t Size, uint32_t Timeout = 100)
 		{
 			return HAL_SPI_Receive(_hspi, pData, Size, Timeout) == HAL_OK;
 		}
-		bool transmitreceive(uint8_t *pTxData, uint8_t *pRxData, uint16_t Size, uint32_t Timeout = 10)
+		bool transmitreceive(uint8_t *pTxData, uint8_t *pRxData, uint16_t Size, uint32_t Timeout = 100)
 		{
 			return HAL_SPI_TransmitReceive(_hspi, pTxData, pRxData, Size, Timeout) == HAL_OK;
 		}
 	};
+#endif
+#ifdef HAL_I2C_MODULE_ENABLED
+	class i2c
+	{
+		I2C_HandleTypeDef *_hi2c;
+
+	public:
+		i2c(I2C_HandleTypeDef *hi2c) :
+			_hi2c(hi2c) {}
+
+		bool transmit(uint16_t DevAddress, uint8_t *pData, uint16_t Size, uint32_t Timeout = 100)
+		{
+			return HAL_I2C_Master_Transmit(_hi2c, DevAddress << 1, pData, Size, Timeout) == HAL_OK;
+		}
+		bool receive(uint16_t DevAddress, uint8_t *pData, uint16_t Size, uint32_t Timeout = 100)
+		{
+			return HAL_I2C_Master_Receive(_hi2c, DevAddress << 1, pData, Size, Timeout) == HAL_OK;
+		}
+	};
+#endif
 }
 
 
