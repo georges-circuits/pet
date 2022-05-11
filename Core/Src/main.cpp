@@ -242,7 +242,7 @@ int main(void)
 		ir = 100 - ((STM32ADC_GetReading(STM32ADC_CHANNEL_IR) / STM32ADC_FULLSCALEVOLTAGE) * 100.0);
 
 		static clock::time_point telemetry_last = clock::time_point(clock::duration(0));
-		if (telemetry_last + 200ms < clock::now())
+		if (telemetry_last + 300ms < clock::now())
 		{
 			telemetry_last = clock::now();
 
@@ -331,6 +331,7 @@ int main(void)
 		else if (autonomous == 2)
 		{
 			static uint last_count = 0;
+			drive.update();
 			if (last_count != mic_detect_count && mic_detect_last + 2s < clock::now())
 			{
 				uint beeps = mic_detect_count - last_count;
