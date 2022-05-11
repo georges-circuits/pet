@@ -29,7 +29,7 @@ static tof_sensor_manager *tof_sensors_handle;
 
 static actuator_manager<actuator<float>> manager;
 
-static const float MIC_LOW = 0.005, MIC_HIGH = 0.01;
+static const float MIC_LOW = 0.017, MIC_HIGH = 0.020;
 static const clock::duration MIC_MIN_HIGH_TIME = 100ms;
 static DSP_Biquad_t mic_bandpass_filter;
 static DSP_MovingAvg_t mic_avg_filter;
@@ -172,7 +172,7 @@ int main(void)
 	Debug_Print("adc sps: %u\n", adc_sps);
 
 	STM32ADC_Stop();
-	DSP_Biquad_Init(&mic_bandpass_filter, BIQUAD_BANDPASS, 440, adc_sps, 10);
+	DSP_Biquad_Init(&mic_bandpass_filter, BIQUAD_BANDPASS, 440, adc_sps, 20);
 	STM32ADC_Start();
 
 
