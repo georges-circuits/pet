@@ -23,11 +23,19 @@
 using namespace sp::literals;
 
 
-UART_HandleTypeDef *uart0_huart = &huart1;
-sp::uart_interface *uart0_handle;
-tof_sensor_manager *tof_sensors_handle;
+static UART_HandleTypeDef *uart0_huart = &huart1;
+static sp::uart_interface *uart0_handle;
+static tof_sensor_manager *tof_sensors_handle;
 
-actuator_manager<actuator<float>> manager;
+static actuator_manager<actuator<float>> manager;
+
+static const float MIC_LOW = 0.005, MIC_HIGH = 0.01;
+static const clock::duration MIC_MIN_HIGH_TIME = 100ms;
+static DSP_Biquad_t mic_bandpass_filter;
+static DSP_MovingAvg_t mic_avg_filter;
+static uint mic_detect_count;
+static clock::time_point mic_detect_last = clock::time_point{clock::duration{0}};
+static float mic_amplitude;
 
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -49,10 +57,32 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	if (htim->Instance == htim6.Instance)
 		manager.update();
 }
+
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	STM32ADC_ConvCpltCallback(hadc);
-	STM32ADC_Start(); //FIXME should not be needed
+
+	static clock::time_point high_start = clock::time_point{clock::duration{0}};
+	static bool triggered = false, incremented = false;
+	DSP_MovingAvg_Put(&mic_avg_filter, abs(DSP_BiquadDF2(&mic_bandpass_filter, STM32ADC_GetReading(STM32ADC_CHANNEL_MIC))));
+	mic_amplitude = mic_avg_filter.value;
+
+	if (mic_amplitude <= MIC_LOW)
+	{
+		triggered = false;
+		incremented = false;
+	}
+	else if (!triggered && mic_amplitude >= MIC_HIGH)
+	{
+		triggered = true;
+		high_start = clock::now();
+	}
+	else if (triggered && high_start + MIC_MIN_HIGH_TIME < clock::now() && !incremented)
+	{
+		incremented = true;
+		++mic_detect_count;
+		mic_detect_last = clock::now();
+	}
 }
 
 void Debug_Print(const char *format, ...)
@@ -87,6 +117,10 @@ int main(void)
 
 	RetargetInit(&huart2);
 	Debug_Print("Hi\n");
+
+	/* this will get reinitialized later once we know the true sample rate */
+	DSP_Biquad_Init(&mic_bandpass_filter, BIQUAD_BANDPASS, 440, 3200, 0.7);
+	DSP_MovingAvg_Init(&mic_avg_filter, 300, 0);
 
 	STM32ADC_Init(&hadc);
 	STM32ADC_Start();
@@ -133,7 +167,18 @@ int main(void)
 
 
 
+	while (!STM32ADC_GetSPS());
+	uint32_t adc_sps = STM32ADC_GetSPS();
+	Debug_Print("adc sps: %u\n", adc_sps);
+
+	STM32ADC_Stop();
+	DSP_Biquad_Init(&mic_bandpass_filter, BIQUAD_BANDPASS, 440, adc_sps, 10);
+	STM32ADC_Start();
+
+
+	/* motor handler timer */
 	HAL_TIM_Base_Start_IT(&htim6);
+
 
 	/*uart0_interface.receive_event.subscribe([&](sp::fragment f) {
 		auto check = sp::footers::crc32(f.data());
@@ -194,13 +239,14 @@ int main(void)
 		fi = DSP_BiquadDF2(&accel_fi_filter, fi);
 
 
-		float _ir = 100 - ((STM32ADC_GetReading(STM32ADC_CHANNEL_IR) / STM32ADC_FULLSCALEVOLTAGE) * 100.0);
-		ir = _ir;//(ir * (1.0 - filter)) + (filter * _ir);
+		ir = 100 - ((STM32ADC_GetReading(STM32ADC_CHANNEL_IR) / STM32ADC_FULLSCALEVOLTAGE) * 100.0);
 
 		static clock::time_point telemetry_last = clock::time_point(clock::duration(0));
 		if (telemetry_last + 200ms < clock::now())
 		{
 			telemetry_last = clock::now();
+
+			Debug_Print("mic %u %i\n", mic_detect_count, (int)(mic_amplitude * 1000));
 
 			/*auto ad = accel.read();
 			Debug_Print("%05d %05d\n", ad.x, ad.y);*/
@@ -230,7 +276,7 @@ int main(void)
 			drive_actuator->set(0);
 			steering_actuator->set(0);
 		}
-		else if (autonomous > 0)
+		else if (autonomous == 1)
 		{
 			bool on_edge = ir < 10;
 			static bool backing_down = false;
@@ -279,6 +325,36 @@ int main(void)
 					drive.next_move<drive_pivot>(0.7, 0.8, 2s, [&](){
 						return fi > -threshold / 2.0;
 					});
+				}
+			}
+		}
+		else if (autonomous == 2)
+		{
+			static uint last_count = 0;
+			if (last_count != mic_detect_count && mic_detect_last + 2s < clock::now())
+			{
+				uint beeps = mic_detect_count - last_count;
+				last_count = mic_detect_count;
+
+				drive.cancel_all();
+				switch (beeps) {
+					case 1:
+						drive.next_move<drive_pivot>(0.7, 0.8, 2s, [started = clock::now()](){
+							return started + 10s < clock::now();
+						});
+						break;
+					case 2:
+						drive.next_move<drive_pivot>(0.7, -0.8, 2s, [started = clock::now()](){
+							return started + 10s < clock::now();
+						});
+						break;
+					case 3:
+						drive.next_move<drive_const>(0.7, 0, [started = clock::now()](){
+							return started + 10s < clock::now();
+						});
+						break;
+					default:
+						break;
 				}
 			}
 		}
