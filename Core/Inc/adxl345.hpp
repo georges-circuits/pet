@@ -41,7 +41,7 @@ public:
 
 	struct data
 	{
-		int16_t x, y, z;
+		int16_t x = 0, y = 0, z = 0;
 	};
 
 	ADXL345(stm32::spi *spi, stm32::gpio ncs):

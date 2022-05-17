@@ -17,6 +17,7 @@
 #include "drive_logic.hpp"
 #include "stm_adc.h"
 #include "dsp.h"
+#include "pid_controller.h"
 
 #define PI 3.14159265358979323846
 
@@ -131,7 +132,9 @@ int main(void)
 
 
 
-	auto steering_actuator = manager.new_actuator<servo>(stm32::timer_pwm_channel(&tim3, TIM_CHANNEL_1));
+	auto steering_actuator = manager.new_actuator<servo>(
+			stm32::timer_pwm_channel(&tim3, TIM_CHANNEL_1)
+	);
 	steering_actuator->set_filter(std::make_unique<filter_linear<float>>(0.08));
 
 	auto drive_actuator = manager.new_actuator<simple_stepper>(
@@ -150,9 +153,16 @@ int main(void)
 
 
 	ADXL345 accel(&spi2, stm32::gpio(SPI2_NCS_GPIO_Port, SPI2_NCS_Pin));
-	DSP_Biquad_t accel_x_filter, accel_y_filter;
+	DSP_Biquad_t accel_x_filter, accel_y_filter, accel_fi_filter;
 	DSP_Biquad_Init(&accel_x_filter, BIQUAD_LOWPASS, 5.0, 1000, 0.7);
 	DSP_Biquad_Init(&accel_y_filter, BIQUAD_LOWPASS, 5.0, 1000, 0.7);
+	DSP_Biquad_Init(&accel_fi_filter, BIQUAD_LOWPASS, 1.0, 1000, 0.7);
+
+	PID_t balancer_pid;
+	PID_Init(&balancer_pid);
+	PID_Set_MinMax(&balancer_pid, -0.8, 0.8);
+	PID_Set_I_DivideDecrement(&balancer_pid, 1.01);
+	PID_Set_Gains(&balancer_pid, 1.5, 0.0, 0.7);
 
 	tof_sensor_manager tof_sensors;
 	tof_sensors_handle = &tof_sensors;
@@ -172,8 +182,9 @@ int main(void)
 	Debug_Print("adc sps: %u\n", adc_sps);
 
 	STM32ADC_Stop();
-	DSP_Biquad_Init(&mic_bandpass_filter, BIQUAD_BANDPASS, 440, adc_sps, 20);
-	STM32ADC_Start();
+	/*DSP_Biquad_Init(&mic_bandpass_filter, BIQUAD_BANDPASS, 440, adc_sps, 20);
+	STM32ADC_Start();*/
+
 
 
 	/* motor handler timer */
@@ -188,14 +199,17 @@ int main(void)
 
 	static uint32_t last_rx = 0;
 	int autonomous = 0;
+	float fi = 0, ir = 0;
+	ADXL345::data ad_raw, ad, ad_cal;
+
 	//uart.transfer_receive_subscribe([&](sp::transfer t) {
 	uart.receive_event.subscribe([&](sp::fragment t) {
 		last_rx = HAL_GetTick();
 		//if (t.data_size() == 2)
-		if (t.data().size() == 2)
+		auto data = t.data();
+		if (data.size() == 2)
 		{
 			//auto data = t.data_contiguous();
-			auto data = t.data();
 			int val = (int)data[1];
 			switch (data[0])
 			{
@@ -209,21 +223,31 @@ int main(void)
 				autonomous = val;
 				drive.cancel_all();
 				break;
+			case 4_BYTE:
+				ad_cal = ad_raw;
+				break;
+			case 5_BYTE:
+				balancer_pid.P_gain = (int)val / 10.0;
+				break;
+			case 6_BYTE:
+				balancer_pid.I_gain = (int)val / 10.0;
+				break;
+			case 7_BYTE:
+				balancer_pid.D_gain = (int)val / 10.0;
+				break;
 			}
 		}
 	});
 
-	float fi = 0, ir = 0;
-
-	DSP_Biquad_t accel_fi_filter;
-	DSP_Biquad_Init(&accel_fi_filter, BIQUAD_LOWPASS, 1.0, 1000, 0.7);
-
 	while (1)
 	{
 		uart.main_task();
-		auto ad = accel.read();
-		ad.x = DSP_BiquadDF2(&accel_x_filter, -ad.x + 20);
-		ad.y = DSP_BiquadDF2(&accel_y_filter, ad.y);
+
+		ad_raw = accel.read();
+		ad_raw.x = DSP_BiquadDF2(&accel_x_filter, -ad_raw.x);
+		ad_raw.y = DSP_BiquadDF2(&accel_y_filter, ad_raw.y);
+		ad.x = ad_raw.x - ad_cal.x;
+		ad.y = ad_raw.y - ad_cal.y;
 
 		bool level = false;
 		if (fabs(ad.x) + fabs(ad.y) > 15)
@@ -251,13 +275,18 @@ int main(void)
 			/*auto ad = accel.read();
 			Debug_Print("%05d %05d\n", ad.x, ad.y);*/
 
-			/*
-			auto data = sp::bytes(0, 0, tof::COUNT);
-			for (auto & sensor : tof_sensors)
+			static uint dist_telem_pres = 0;
+			if (++dist_telem_pres >= 3)
 			{
-				auto val = sensor.value();
-				data.push_back((sp::byte)(val == tof_sensor::invalid_value ? 0 : val / 10));
-			}*/
+				dist_telem_pres = 0;
+				auto data = sp::bytes(0, 0, tof::COUNT);
+				for (auto & sensor : tof_sensors)
+				{
+					auto val = sensor.value();
+					data.push_back((sp::byte)(val == tof_sensor::invalid_value ? 0 : val / 10));
+				}
+				uart.write_noexcept(sp::fragment(2, std::move(data)));
+			}
 
 			float voltage = STM32ADC_GetReading(STM32ADC_CHANNEL_BATT) * 6.6;
 
@@ -356,6 +385,24 @@ int main(void)
 						break;
 					default:
 						break;
+				}
+			}
+		}
+		else if (autonomous == 3)
+		{
+			const int16_t max_defl = 150;
+			static clock::time_point last = clock::time_point(clock::duration(0));
+			if (last + 100ms < clock::now())
+			{
+				last = clock::now();
+				if (abs(ad.x) < max_defl && abs(ad.y) < max_defl)
+				{
+					auto v = PID_Update_Setpoint_TimeDelta(&balancer_pid, 0, ad.x / 100.0, 1.0);
+					drive_actuator->set(-v);
+				}
+				else
+				{
+					drive_actuator->set(0);
 				}
 			}
 		}

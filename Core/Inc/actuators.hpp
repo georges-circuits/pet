@@ -229,6 +229,7 @@ public:
 			stm32::gpio_inv enable, bool brake = true) :
 		_step_gen(step_generator), _direction(direction), _enable(enable), _brake(brake)
 	{
+		_enable.reset();
 		set(0);
 	}
 
